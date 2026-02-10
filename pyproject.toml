@@ -22,7 +22,11 @@ dependencies = [
     "torch>=2.0",
     "safetensors>=0.4",
     "numpy>=1.21",
+    "click>=8.0",
 ]
+
+[project.scripts]
+vlora = "vlora.cli:cli"
 
 [project.optional-dependencies]
 hub = ["huggingface-hub>=0.20"]

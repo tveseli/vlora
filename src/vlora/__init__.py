@@ -16,6 +16,12 @@ from vlora.ops import (
     reconstruct_from_subspace,
     select_num_components,
 )
+from vlora.analysis import (
+    adapter_diff,
+    compute_similarity_matrix,
+    find_clusters,
+    subspace_coverage,
+)
 from vlora.pipeline import absorb_task, extract_adapter, init_subspace
 from vlora.subspace import SharedSubspace, TaskProjection
 
@@ -39,4 +45,9 @@ __all__ = [
     "gram_schmidt",
     "explained_variance_ratio",
     "select_num_components",
+    # Analysis
+    "compute_similarity_matrix",
+    "find_clusters",
+    "adapter_diff",
+    "subspace_coverage",
 ]
