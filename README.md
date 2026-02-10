@@ -1,6 +1,10 @@
-# vLoRA
+<p align="center">
+  <img src="logo.png" alt="vLoRA" width="400">
+</p>
 
-**Shared low-rank subspaces for efficient LoRA adapter management.**
+<p align="center">
+  <strong>Shared low-rank subspaces for efficient LoRA adapter management.</strong>
+</p>
 
 Based on the [Share paper](https://arxiv.org/abs/2602.06043): LoRA adapters across tasks share a common low-rank subspace. Instead of storing *N* separate adapters, maintain **one shared basis** and **per-task coefficient vectors** — achieving up to 100× parameter reduction.
 
