@@ -1,0 +1,146 @@
+"""Tests for vlora.subspace — SharedSubspace core class."""
+
+import tempfile
+from pathlib import Path
+
+import torch
+import pytest
+
+from vlora.io import LoRAWeights
+from vlora.subspace import SharedSubspace, TaskProjection
+
+
+def _make_adapters(n=5, layers=None, rank=4, dim=64):
+    """Create n synthetic adapters that share structure."""
+    if layers is None:
+        layers = ["layer.0.q_proj", "layer.0.v_proj"]
+
+    # Create a shared basis so adapters are correlated (realistic scenario)
+    shared_a = {l: torch.randn(3, rank * dim) for l in layers}
+    shared_b = {l: torch.randn(3, dim * rank) for l in layers}
+
+    adapters = []
+    for i in range(n):
+        lora_a = {}
+        lora_b = {}
+        for l in layers:
+            coeffs_a = torch.randn(3)
+            coeffs_b = torch.randn(3)
+            lora_a[l] = (coeffs_a @ shared_a[l] + torch.randn(rank * dim) * 0.01).reshape(rank, dim)
+            lora_b[l] = (coeffs_b @ shared_b[l] + torch.randn(dim * rank) * 0.01).reshape(dim, rank)
+        adapters.append(LoRAWeights(layer_names=layers, lora_a=lora_a, lora_b=lora_b, rank=rank))
+
+    return adapters, layers
+
+
+class TestFromAdapters:
+    def test_basic_init(self):
+        adapters, layers = _make_adapters(5)
+        sub = SharedSubspace.from_adapters(adapters, num_components=2)
+        assert sub.num_components == 2
+        assert len(sub.tasks) == 5
+        assert set(sub.layer_names) == set(layers)
+
+    def test_auto_component_selection(self):
+        adapters, _ = _make_adapters(5)
+        sub = SharedSubspace.from_adapters(adapters, variance_threshold=0.5)
+        assert sub.num_components >= 1
+
+    def test_custom_task_ids(self):
+        adapters, _ = _make_adapters(3)
+        ids = ["alpha", "beta", "gamma"]
+        sub = SharedSubspace.from_adapters(adapters, task_ids=ids, num_components=2)
+        assert set(sub.tasks.keys()) == set(ids)
+
+    def test_mismatched_ids_raises(self):
+        adapters, _ = _make_adapters(3)
+        with pytest.raises(ValueError):
+            SharedSubspace.from_adapters(adapters, task_ids=["a", "b"])
+
+
+class TestProjectAndReconstruct:
+    def test_project_returns_task_projection(self):
+        adapters, layers = _make_adapters(5)
+        sub = SharedSubspace.from_adapters(adapters, num_components=3)
+        new_adapter = _make_adapters(1)[0][0]
+        proj = sub.project(new_adapter, "new")
+        assert isinstance(proj, TaskProjection)
+        assert proj.task_id == "new"
+        for l in layers:
+            assert proj.loadings_a[l].shape == (3,)
+
+    def test_reconstruct_shape(self):
+        adapters, layers = _make_adapters(5, rank=4, dim=64)
+        sub = SharedSubspace.from_adapters(adapters, num_components=3)
+        recon = sub.reconstruct("task_0")
+        for l in layers:
+            assert recon.lora_a[l].shape == (4, 64)
+            assert recon.lora_b[l].shape == (64, 4)
+
+    def test_in_subspace_reconstruction_is_good(self):
+        """Adapters used to build the subspace should reconstruct well."""
+        adapters, layers = _make_adapters(5)
+        sub = SharedSubspace.from_adapters(adapters, num_components=3)
+
+        recon = sub.reconstruct("task_0")
+        orig = adapters[0]
+        for l in layers:
+            error = (orig.lora_a[l].flatten() - recon.lora_a[l].flatten()).norm()
+            orig_norm = orig.lora_a[l].flatten().norm()
+            relative_error = error / (orig_norm + 1e-8)
+            # With 3 components for data that lives in ~3D subspace, error should be small
+            assert relative_error < 0.5, f"Reconstruction error too high: {relative_error}"
+
+
+class TestAbsorb:
+    def test_absorb_adds_task(self):
+        adapters, _ = _make_adapters(3)
+        sub = SharedSubspace.from_adapters(adapters, num_components=2)
+        new = _make_adapters(1)[0][0]
+        sub.absorb(new, "new_task")
+        assert "new_task" in sub.tasks
+        assert len(sub.tasks) == 4
+
+    def test_absorb_preserves_existing_tasks(self):
+        adapters, _ = _make_adapters(3)
+        sub = SharedSubspace.from_adapters(adapters, num_components=2)
+        new = _make_adapters(1)[0][0]
+        sub.absorb(new, "new_task")
+        # All original tasks should still be present
+        for i in range(3):
+            assert f"task_{i}" in sub.tasks
+
+
+class TestSaveLoad:
+    def test_roundtrip(self, tmp_path):
+        adapters, layers = _make_adapters(3)
+        sub = SharedSubspace.from_adapters(adapters, num_components=2)
+
+        sub.save(tmp_path / "subspace")
+        loaded = SharedSubspace.load(tmp_path / "subspace")
+
+        assert loaded.layer_names == sub.layer_names
+        assert loaded.num_components == sub.num_components
+        assert set(loaded.tasks.keys()) == set(sub.tasks.keys())
+
+        for l in layers:
+            assert torch.allclose(loaded.components_a[l], sub.components_a[l])
+            assert torch.allclose(loaded.components_b[l], sub.components_b[l])
+
+
+class TestTrainableParams:
+    def test_returns_params_with_grad(self):
+        adapters, layers = _make_adapters(3)
+        sub = SharedSubspace.from_adapters(adapters, num_components=2)
+        params = sub.get_trainable_params("task_0")
+        for name, p in params.items():
+            assert p.requires_grad
+        assert len(params) == len(layers) * 2  # A and B per layer
+
+    def test_expand_adds_dimensions(self):
+        adapters, layers = _make_adapters(3)
+        sub = SharedSubspace.from_adapters(adapters, num_components=2)
+        params = sub.get_trainable_params("task_0", num_expand=2)
+        # Each loading should now have 2 + 2 = 4 dimensions (or more if Gram-Schmidt found more)
+        for name, p in params.items():
+            assert p.shape[0] >= 4
