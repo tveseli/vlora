@@ -6,7 +6,7 @@
   <strong>Shared low-rank subspaces for efficient LoRA adapter management.</strong>
 </p>
 
-Based on the [Share paper](https://arxiv.org/abs/2602.06043): LoRA adapters across tasks share a common low-rank subspace. Instead of storing *N* separate adapters, maintain **one shared basis** and **per-task coefficient vectors** — achieving up to 100× parameter reduction.
+Based on the [Share paper](https://arxiv.org/abs/2602.06043): LoRA adapters across tasks share a common low-rank subspace. Instead of storing *N* separate adapters, maintain **one shared basis** and **per-task coefficient vectors** — achieving up to 122× compression at scale.
 
 ## Install
 
@@ -46,6 +46,137 @@ subspace.save("shared_subspace/")
 subspace = SharedSubspace.load("shared_subspace/")
 ```
 
+## CLI
+
+vlora ships with a command-line tool for common workflows:
+
+```bash
+# Build a shared subspace from adapter directories
+vlora compress adapters/task_0 adapters/task_1 adapters/task_2 -o shared_subspace/
+
+# Inspect a subspace
+vlora info shared_subspace/
+
+# Export a task back to PEFT format
+vlora export shared_subspace/ task_0 -o exported_adapter/
+
+# Add a new adapter to an existing subspace
+vlora add shared_subspace/ adapters/new_task --task-id new_task
+
+# Analyze adapter similarity and clustering
+vlora analyze adapters/task_0 adapters/task_1 adapters/task_2
+```
+
+## Multi-Task Inference
+
+Wrap any PyTorch model with `VLoRAModel` for on-the-fly adapter switching:
+
+```python
+from vlora import VLoRAModel, SharedSubspace
+
+subspace = SharedSubspace.load("shared_subspace/")
+model = VLoRAModel(base_model, subspace)
+
+# Switch adapters instantly — reconstructed from compressed loadings
+model.set_task("task_0")
+output = model(input_ids)
+
+model.set_task("task_1")  # cached if same task
+output = model(input_ids)
+
+print(model.available_tasks)  # ["task_0", "task_1", ...]
+```
+
+## Training in the Subspace
+
+Train only the loadings vector (k params per layer) instead of full LoRA matrices — 100×+ parameter reduction:
+
+```python
+from vlora import SharedSubspace, orthogonal_init, SubspaceTrainer
+
+subspace = SharedSubspace.load("shared_subspace/")
+orthogonal_init(subspace, "new_task")  # initialize near-zero
+
+trainer = SubspaceTrainer(subspace, "new_task", lr=1e-3)
+print(f"Trainable params: {trainer.num_trainable_params}")  # e.g. 192 vs 200K
+
+for batch in dataloader:
+    loss = compute_loss(model, batch)
+    trainer.step(loss)
+
+trainer.write_back()  # persist learned loadings
+subspace.save("updated_subspace/")
+```
+
+## Task Router
+
+Automatically blend adapters per input using a lightweight router:
+
+```python
+from vlora import TaskRouter, SharedSubspace
+
+subspace = SharedSubspace.load("shared_subspace/")
+router = TaskRouter.from_subspace(subspace, input_dim=4096)
+
+# Router produces soft blend weights over tasks
+x = get_input_embedding(batch)  # (B, 4096)
+blended = router.blend_loadings(x, subspace)
+subspace.tasks["__routed__"] = blended
+recon = subspace.reconstruct("__routed__")
+```
+
+## Adapter Analysis
+
+Analyze relationships between adapters before compression:
+
+```python
+from vlora import load_adapter, compute_similarity_matrix, find_clusters, adapter_diff
+
+adapters = [load_adapter(f"adapters/task_{i}") for i in range(10)]
+
+# Pairwise cosine similarity
+sim_matrix = compute_similarity_matrix(adapters)
+
+# Find redundant adapter groups
+clusters = find_clusters(sim_matrix, threshold=0.9)
+
+# Per-layer comparison of two adapters
+diff = adapter_diff(adapters[0], adapters[1])
+```
+
+## Advanced Compression
+
+```python
+# Adaptive k: different components per layer based on explained variance
+subspace = SharedSubspace.from_adapters(adapters, adaptive_k=True, variance_threshold=0.9)
+
+# Quantize components for smaller memory footprint
+subspace.quantize(bits=8)  # or bits=4
+
+# Check compression stats
+stats = subspace.compression_stats()
+print(f"Compression ratio: {stats['compression_ratio']:.1f}×")
+print(f"Compressed: {stats['total_params_compressed']:,} params")
+print(f"Original:   {stats['total_params_original']:,} params")
+```
+
+## Incremental Updates
+
+Scale to thousands of adapters without loading them all at once:
+
+```python
+# Streaming: load adapters one at a time from disk
+subspace = SharedSubspace.from_adapters_streaming(
+    adapter_paths, num_components=8
+)
+
+# Incremental absorb: fast O(1) update without full SVD recompute
+subspace.absorb_incremental(new_adapter, "new_task")
+
+# Move to GPU / change precision
+subspace.to(device="cuda", dtype=torch.float16)
+```
+
 ## The 3-Step Algorithm
 
 | Step | Method | What happens |
@@ -60,12 +191,45 @@ subspace = SharedSubspace.load("shared_subspace/")
 
 - **`SharedSubspace`** — Central state container. Holds per-layer basis and per-task loadings.
   - `.from_adapters(adapters, ...)` — Build from existing adapters
+  - `.from_adapters_streaming(paths, ...)` — Build one adapter at a time from disk
   - `.project(adapter, task_id)` → `TaskProjection`
   - `.add_task(projection)` — Register a projected task
   - `.reconstruct(task_id)` → `LoRAWeights`
-  - `.absorb(adapter, task_id)` — Incorporate + recompute
+  - `.absorb(adapter, task_id)` — Incorporate + recompute (full SVD)
+  - `.absorb_incremental(adapter, task_id)` — Fast incremental update
   - `.get_trainable_params(task_id)` — For training integration
+  - `.quantize(bits=8)` — Quantize components (int8/int4)
+  - `.compression_stats()` — Compression ratio and parameter counts
+  - `.to(device, dtype)` — Move tensors to device/dtype
   - `.save(path)` / `.load(path)` — Serialization
+
+### Model Integration
+
+- **`VLoRAModel(base_model, subspace)`** — Inference wrapper with forward hooks
+  - `.set_task(task_id)` — Switch adapter (cached)
+  - `.clear_task()` — Remove adapter
+  - `.available_tasks` — List task IDs
+  - `.reconstruct_state_dict(task_id)` — Get delta weight dict
+
+### Training
+
+- **`orthogonal_init(subspace, task_id)`** — Initialize new task with small loadings
+- **`SubspaceTrainer(subspace, task_id)`** — Optimizer wrapper for loadings-only training
+  - `.step(loss)` — Backprop + update
+  - `.write_back()` — Persist to subspace
+
+### Router
+
+- **`TaskRouter(input_dim, num_tasks)`** — Lightweight adapter routing MLP
+  - `.from_subspace(subspace, input_dim)` — Auto-create from subspace
+  - `.blend_loadings(x, subspace)` — Per-input adapter blending
+
+### Analysis
+
+- **`compute_similarity_matrix(adapters)`** — Pairwise cosine similarity
+- **`find_clusters(sim_matrix, threshold)`** — Greedy clustering
+- **`adapter_diff(a, b)`** — Per-layer L2 distance + cosine similarity
+- **`subspace_coverage(subspace, adapter)`** — How well subspace represents an adapter
 
 ### I/O
 
@@ -83,6 +247,7 @@ subspace = SharedSubspace.load("shared_subspace/")
 
 - `compute_svd`, `project_onto_subspace`, `reconstruct_from_subspace`
 - `gram_schmidt`, `explained_variance_ratio`, `select_num_components`
+- `incremental_svd_update`
 
 ## Benchmarks — Real-World Adapters
 
@@ -123,6 +288,7 @@ python examples/real_adapters.py
 
 - `torch >= 2.0`
 - `safetensors >= 0.4`
+- `click >= 8.0`
 - `huggingface-hub >= 0.20` *(optional, for Hub loading)*
 
 ## Citation
