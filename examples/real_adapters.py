@@ -6,7 +6,7 @@ algorithm, and reports reconstruction error, variance explained, and
 memory savings.
 
 Usage:
-    pip install vlora[hub]
+    pip install vlora-dev[hub]
     python examples/real_adapters.py
 """
 

@@ -29,7 +29,7 @@ At k=4 components, B-side matrices explain 95% of variance across 8 Mistral-7B a
 ### What's in the box
 
 ```bash
-pip install vlora
+pip install vlora-dev
 ```
 
 **CLI** (9 commands):
@@ -60,7 +60,7 @@ vlora validate subspace/
 ### Links
 
 - GitHub: https://github.com/tveseli/vlora
-- PyPI: https://pypi.org/project/vlora/
+- PyPI: https://pypi.org/project/vlora-dev/
 - Paper: https://arxiv.org/abs/2602.06043
 - Website: https://vlora-dev.web.app
 

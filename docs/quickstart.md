@@ -7,17 +7,17 @@ Try vlora in Google Colab or locally.
 ## Install
 
 ```bash
-pip install vlora
+pip install vlora-dev
 ```
 
 For HuggingFace Hub loading:
 ```bash
-pip install vlora[hub]
+pip install vlora-dev[hub]
 ```
 
 For HuggingFace Trainer integration:
 ```bash
-pip install vlora[hf]
+pip install vlora-dev[hf]
 ```
 
 ## CLI Workflow

@@ -44,7 +44,7 @@ def _require_transformers():
     if not HAS_TRANSFORMERS:
         raise ImportError(
             "transformers is required for HuggingFace integration. "
-            "Install with: pip install vlora[hf]"
+            "Install with: pip install vlora-dev[hf]"
         )
 
 

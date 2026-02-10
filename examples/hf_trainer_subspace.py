@@ -4,7 +4,7 @@ This shows how to use VLoRACallback to train only the subspace loadings
 (a few hundred parameters) instead of full LoRA matrices (hundreds of thousands).
 
 Usage:
-    pip install vlora[hf]
+    pip install vlora-dev[hf]
     python examples/hf_trainer_subspace.py
 """
 

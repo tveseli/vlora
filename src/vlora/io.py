@@ -114,14 +114,14 @@ def load_adapter(path: str | Path) -> LoRAWeights:
 def load_adapter_from_hub(repo_id: str, revision: str | None = None) -> LoRAWeights:
     """Load a PEFT LoRA adapter from HuggingFace Hub.
 
-    Requires the `huggingface-hub` package (install with `pip install vlora[hub]`).
+    Requires the `huggingface-hub` package (install with `pip install vlora-dev[hub]`).
     """
     try:
         from huggingface_hub import snapshot_download
     except ImportError:
         raise ImportError(
             "huggingface-hub is required to load from Hub. "
-            "Install with: pip install vlora[hub]"
+            "Install with: pip install vlora-dev[hub]"
         )
 
     local_dir = snapshot_download(

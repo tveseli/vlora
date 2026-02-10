@@ -7,7 +7,7 @@ Based on the [Share paper](https://arxiv.org/abs/2602.06043): LoRA adapters acro
 ## Install
 
 ```bash
-pip install vlora
+pip install vlora-dev
 ```
 
 ## Quick Example

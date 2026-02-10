@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "vlora"
-version = "0.2.0"
+name = "vlora-dev"
+version = "0.2.1"
 description = "Shared low-rank subspaces for efficient LoRA adapter management"
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,6 +21,7 @@ classifiers = [
 dependencies = [
     "torch>=2.0",
     "safetensors>=0.4",
+    "packaging>=21.0",
     "numpy>=1.21",
     "click>=8.0",
 ]

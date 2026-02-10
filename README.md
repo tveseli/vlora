@@ -11,7 +11,7 @@ Based on the [Share paper](https://arxiv.org/abs/2602.06043): LoRA adapters acro
 ## Install
 
 ```bash
-pip install vlora
+pip install vlora-dev
 ```
 
 Or from source:
@@ -321,7 +321,7 @@ Tested with 8 [Lots-of-LoRAs](https://huggingface.co/Lots-of-LoRAs) adapters (Mi
 
 Run the benchmark yourself:
 ```bash
-pip install vlora[hub]
+pip install vlora-dev[hub]
 python examples/real_adapters.py
 ```
 
@@ -355,8 +355,8 @@ subspace.save("updated_subspace/")
 - `torch >= 2.0`
 - `safetensors >= 0.4`
 - `click >= 8.0`
-- `huggingface-hub >= 0.20` *(optional, `pip install vlora[hub]`)*
-- `transformers >= 4.38` *(optional, `pip install vlora[hf]`)*
+- `huggingface-hub >= 0.20` *(optional, `pip install vlora-dev[hub]`)*
+- `transformers >= 4.38` *(optional, `pip install vlora-dev[hf]`)*
 
 ## Citation
 
