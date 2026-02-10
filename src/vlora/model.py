@@ -134,3 +134,15 @@ class VLoRAModel(nn.Module):
         for layer_name in weights.layer_names:
             deltas[layer_name] = weights.lora_b[layer_name] @ weights.lora_a[layer_name]
         return deltas
+
+    def compile(self, **kwargs) -> VLoRAModel:
+        """Compile the base model with torch.compile for faster inference.
+
+        Passes all kwargs to torch.compile(). The LoRA hooks remain
+        uncompiled (they're lightweight matmuls) while the base model
+        benefits from fusion and kernel optimization.
+
+        Returns self for chaining.
+        """
+        self.base_model = torch.compile(self.base_model, **kwargs)
+        return self

@@ -144,3 +144,48 @@ def subspace_coverage(
         result[layer] = coverages
 
     return result
+
+
+def find_outliers(
+    adapters: list[LoRAWeights],
+    threshold: float = 2.0,
+) -> list[dict]:
+    """Detect adapter outliers based on distance from the group mean.
+
+    Computes each adapter's flattened weight vector, measures the L2
+    distance from the group centroid, and flags adapters whose distance
+    exceeds `threshold` standard deviations above the mean distance.
+
+    Args:
+        adapters: List of adapters to analyze.
+        threshold: Number of standard deviations above mean distance
+            to consider an outlier. Default 2.0.
+
+    Returns:
+        List of dicts with keys: {"index", "distance", "z_score"} for
+        each outlier adapter.
+    """
+    if len(adapters) < 3:
+        return []
+
+    vectors = torch.stack([_flatten_adapter(a) for a in adapters])
+    centroid = vectors.mean(dim=0)
+    distances = (vectors - centroid).norm(dim=1)
+
+    mean_dist = distances.mean().item()
+    std_dist = distances.std().item()
+
+    if std_dist < 1e-8:
+        return []
+
+    outliers = []
+    for i in range(len(adapters)):
+        z = (distances[i].item() - mean_dist) / std_dist
+        if z > threshold:
+            outliers.append({
+                "index": i,
+                "distance": distances[i].item(),
+                "z_score": z,
+            })
+
+    return outliers

@@ -1,0 +1,55 @@
+# Example Axolotl config for training with vlora subspace integration.
+#
+# This config trains a standard LoRA adapter that can then be
+# compressed into a vlora shared subspace.
+#
+# Workflow:
+#   1. Train multiple adapters with Axolotl (one per task)
+#   2. Compress all adapters into a shared subspace:
+#      vlora compress ./output/task_*/adapter -o shared_subspace/ -k 8
+#   3. For new tasks, train only the subspace loadings:
+#      See examples/hf_trainer_subspace.py
+#
+# Usage:
+#   accelerate launch -m axolotl.cli.train examples/axolotl_config.yml
+
+base_model: meta-llama/Llama-3.2-1B
+model_type: LlamaForCausalLM
+
+load_in_8bit: false
+load_in_4bit: false
+
+adapter: lora
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - v_proj
+  - k_proj
+  - o_proj
+
+datasets:
+  - path: your_dataset_here
+    type: alpaca
+
+output_dir: ./output/task_0/adapter
+
+# Training
+num_epochs: 3
+micro_batch_size: 4
+gradient_accumulation_steps: 4
+learning_rate: 2e-4
+optimizer: adamw_torch
+lr_scheduler: cosine
+warmup_steps: 100
+
+# Save PEFT adapter (compatible with vlora load_adapter)
+save_strategy: epoch
+save_safetensors: true
+
+# After training, compress with vlora:
+#   vlora compress ./output/task_*/adapter -o shared_subspace/ -k 8 --adaptive-k
+#
+# Or add to existing subspace:
+#   vlora add shared_subspace/ ./output/task_0/adapter --task-id task_0

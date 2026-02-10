@@ -22,6 +22,7 @@ from vlora.analysis import (
     adapter_diff,
     compute_similarity_matrix,
     find_clusters,
+    find_outliers,
     subspace_coverage,
 )
 from vlora.pipeline import absorb_task, extract_adapter, init_subspace
@@ -55,6 +56,7 @@ __all__ = [
     "find_clusters",
     "adapter_diff",
     "subspace_coverage",
+    "find_outliers",
     # Model
     "VLoRAModel",
     # Router

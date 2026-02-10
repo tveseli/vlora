@@ -243,6 +243,7 @@ subspace.to(device="cuda", dtype=torch.float16)
   - `.clear_task()` — Remove adapter
   - `.available_tasks` — List task IDs
   - `.reconstruct_state_dict(task_id)` — Get delta weight dict
+  - `.compile()` — torch.compile the base model for faster inference
 
 ### Training
 
@@ -269,6 +270,7 @@ subspace.to(device="cuda", dtype=torch.float16)
 - **`find_clusters(sim_matrix, threshold)`** — Greedy clustering
 - **`adapter_diff(a, b)`** — Per-layer L2 distance + cosine similarity
 - **`subspace_coverage(subspace, adapter)`** — How well subspace represents an adapter
+- **`find_outliers(adapters, threshold)`** — Detect statistical outlier adapters
 
 ### I/O
 
@@ -323,12 +325,38 @@ pip install vlora[hub]
 python examples/real_adapters.py
 ```
 
+## HuggingFace Trainer Integration
+
+Train in the subspace directly with HuggingFace Trainer:
+
+```python
+from vlora import SharedSubspace, orthogonal_init
+from vlora.integrations.huggingface import VLoRACallback
+
+subspace = SharedSubspace.load("shared_subspace/")
+orthogonal_init(subspace, "new_task")
+
+callback = VLoRACallback(subspace, "new_task", lr=1e-3)
+trainer = Trainer(model=base_model, args=args, callbacks=[callback])
+trainer.train()
+subspace.save("updated_subspace/")
+```
+
+## Documentation
+
+- [Quickstart notebook](examples/quickstart.ipynb) — try vlora in Google Colab
+- [Migration from PEFT](docs/migration_from_peft.md) — integrate into existing workflow
+- [vLLM guide](docs/guide_vllm.md) — serve with vLLM
+- [TGI guide](docs/guide_tgi.md) — serve with TGI
+- [Ollama guide](docs/guide_ollama.md) — local inference via GGUF
+
 ## Dependencies
 
 - `torch >= 2.0`
 - `safetensors >= 0.4`
 - `click >= 8.0`
-- `huggingface-hub >= 0.20` *(optional, for Hub loading)*
+- `huggingface-hub >= 0.20` *(optional, `pip install vlora[hub]`)*
+- `transformers >= 4.38` *(optional, `pip install vlora[hf]`)*
 
 ## Citation
 

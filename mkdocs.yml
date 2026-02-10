@@ -1,0 +1,50 @@
+site_name: vlora
+site_description: Shared low-rank subspaces for efficient LoRA adapter management
+site_url: https://tveseli.github.io/vlora/
+repo_url: https://github.com/tveseli/vlora
+repo_name: tveseli/vlora
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: cyan
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - content.code.annotate
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quickstart: quickstart.md
+    - Migration from PEFT: migration_from_peft.md
+  - Guides:
+    - vLLM: guide_vllm.md
+    - TGI: guide_tgi.md
+    - Ollama: guide_ollama.md
+  - API Reference: api.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 3
+            docstring_style: google
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
