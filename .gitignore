@@ -17,3 +17,4 @@ env/
 *.safetensors
 *.bin
 .DS_Store
+.claude/

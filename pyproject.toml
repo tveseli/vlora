@@ -9,7 +9,7 @@ description = "Shared low-rank subspaces for efficient LoRA adapter management"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.9"
-authors = [{ name = "Taulant Veseli" }]
+authors = [{ name = "Tim Veseli" }]
 keywords = ["lora", "llm", "parameter-efficient", "fine-tuning", "subspace"]
 classifiers = [
     "Development Status :: 3 - Alpha",

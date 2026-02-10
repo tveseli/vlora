@@ -145,8 +145,11 @@ def stack_lora_weights(
     if not adapters:
         raise ValueError("Need at least one adapter to stack")
 
-    # Use the first adapter's layer names as the reference set
-    layer_names = adapters[0].layer_names
+    # Use intersection of all adapters' layer names
+    layer_set = set(adapters[0].layer_names)
+    for adapter in adapters[1:]:
+        layer_set &= set(adapter.layer_names)
+    layer_names = sorted(layer_set)
 
     stacked: dict[str, Tensor] = {}
     for layer in layer_names:

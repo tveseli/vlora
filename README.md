@@ -84,6 +84,41 @@ subspace = SharedSubspace.load("shared_subspace/")
 - `compute_svd`, `project_onto_subspace`, `reconstruct_from_subspace`
 - `gram_schmidt`, `explained_variance_ratio`, `select_num_components`
 
+## Benchmarks — Real-World Adapters
+
+Tested with 8 [Lots-of-LoRAs](https://huggingface.co/Lots-of-LoRAs) adapters (Mistral-7B, rank 16, 96 layers each):
+
+**Variance explained** — the B matrices share structure much more strongly:
+
+| k | Variance (A) | Variance (B) |
+|---|-------------|-------------|
+| 1 | 0.19 | 0.43 |
+| 2 | 0.37 | 0.73 |
+| 4 | 0.69 | 0.95 |
+| 6 | 1.00 | 1.00 |
+
+**Reconstruction error** (relative L2 norm):
+
+| k | Mean Error | Max Error |
+|---|-----------|-----------|
+| 1 | 0.826 | 0.938 |
+| 4 | 0.387 | 0.846 |
+| 6 | 0.000002 | 0.000003 |
+
+**Compression at scale** — shared basis is a one-time cost; each new adapter adds only k loadings per layer:
+
+| N adapters | Full (MB) | vLoRA (MB) | Ratio |
+|-----------|----------|-----------|-------|
+| 8 | 288 | 288 | 1.0× |
+| 100 | 3,600 | 289 | 12.5× |
+| 1,000 | 36,000 | 293 | 122.8× |
+
+Run the benchmark yourself:
+```bash
+pip install vlora[hub]
+python examples/real_adapters.py
+```
+
 ## Dependencies
 
 - `torch >= 2.0`

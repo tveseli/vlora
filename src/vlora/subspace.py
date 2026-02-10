@@ -95,7 +95,23 @@ class SharedSubspace:
         if len(task_ids) != len(adapters):
             raise ValueError("task_ids length must match adapters length")
 
-        layer_names = adapters[0].layer_names
+        # Intersect layer names across all adapters for safety
+        layer_set = set(adapters[0].layer_names)
+        for adapter in adapters[1:]:
+            layer_set &= set(adapter.layer_names)
+        layer_names = sorted(layer_set)
+
+        if not layer_names:
+            raise ValueError("Adapters share no common layers")
+
+        if len(layer_names) < len(adapters[0].layer_names):
+            import warnings
+            dropped = set(adapters[0].layer_names) - layer_set
+            warnings.warn(
+                f"Adapters have different layer sets. Using {len(layer_names)} "
+                f"common layers (dropped {len(dropped)}: {sorted(dropped)[:3]}...)"
+            )
+
         rank = adapters[0].rank
 
         # Stack weights into data matrices
