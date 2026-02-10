@@ -25,7 +25,9 @@ from vlora.analysis import (
     subspace_coverage,
 )
 from vlora.pipeline import absorb_task, extract_adapter, init_subspace
+from vlora.router import TaskRouter
 from vlora.subspace import SharedSubspace, TaskProjection
+from vlora.training import SubspaceTrainer, orthogonal_init
 
 __all__ = [
     # Core
@@ -54,6 +56,11 @@ __all__ = [
     "subspace_coverage",
     # Model
     "VLoRAModel",
+    # Router
+    "TaskRouter",
+    # Training
+    "SubspaceTrainer",
+    "orthogonal_init",
     # Incremental
     "incremental_svd_update",
 ]

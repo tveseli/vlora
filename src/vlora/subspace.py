@@ -74,6 +74,7 @@ class SharedSubspace:
         task_ids: list[str] | None = None,
         variance_threshold: float = 0.6,
         num_components: int | None = None,
+        adaptive_k: bool = False,
     ) -> SharedSubspace:
         """Step 1: Build shared subspace from existing adapters.
 
@@ -87,6 +88,9 @@ class SharedSubspace:
                 num_components is None).
             num_components: Explicit number of basis vectors per layer.
                 Overrides variance_threshold if set.
+            adaptive_k: If True, select k independently per layer based on
+                variance_threshold. Each layer gets the minimal k that explains
+                the threshold. Overrides num_components.
         """
         if not adapters:
             raise ValueError("Need at least one adapter")
@@ -136,20 +140,30 @@ class SharedSubspace:
                 data = stacked[layer]
                 comps, svals, mean = compute_svd(data, num_components=None, center=True)
 
-                if num_components is not None:
+                if adaptive_k:
+                    # Per-layer: each layer/side gets its own k
+                    k = select_num_components(svals, variance_threshold)
+                elif num_components is not None:
                     k = min(num_components, len(svals))
                 else:
                     k = select_num_components(svals, variance_threshold)
 
-                if resolved_k is None:
-                    resolved_k = k
-                # Use consistent k across layers for simplicity
-                k = resolved_k
+                if not adaptive_k:
+                    if resolved_k is None:
+                        resolved_k = k
+                    # Use consistent k across layers for simplicity
+                    k = resolved_k
 
                 comp_dict[layer] = comps[:k]
                 sv_dict[layer] = svals[:k]
                 mean_dict[layer] = mean
 
+        # For adaptive_k, use the max per-layer k as the reported num_components
+        if adaptive_k:
+            resolved_k = max(
+                max(components_a[l].shape[0], components_b[l].shape[0])
+                for l in layer_names
+            )
         resolved_k = resolved_k or 1
 
         # Project all input adapters onto the basis
@@ -395,6 +409,85 @@ class SharedSubspace:
                     loads[layer] = t
 
         return self
+
+    def quantize(self, bits: int = 8) -> SharedSubspace:
+        """Quantize components to reduce memory footprint.
+
+        Applies symmetric per-tensor quantization to the component matrices.
+        Loadings and means are kept in float32 for accuracy. This is a
+        lossy operation — quantized components introduce small reconstruction
+        errors but can reduce memory by 2-4x.
+
+        Args:
+            bits: Quantization bit width (8 or 4). Default 8.
+
+        Returns:
+            self (modified in-place).
+        """
+        if bits not in (4, 8):
+            raise ValueError(f"bits must be 4 or 8, got {bits}")
+
+        qmax = (1 << (bits - 1)) - 1  # 127 for int8, 7 for int4
+
+        for layer in self.layer_names:
+            for attr in ["components_a", "components_b"]:
+                d = getattr(self, attr)
+                t = d[layer].float()
+                # Symmetric quantization: scale = max(abs(t)) / qmax
+                scale = t.abs().max() / qmax
+                if scale == 0:
+                    continue
+                # Quantize, round, dequantize
+                quantized = (t / scale).round().clamp(-qmax, qmax)
+                d[layer] = (quantized * scale).to(t.dtype)
+
+        return self
+
+    def compression_stats(self) -> dict:
+        """Compute compression statistics for the current subspace.
+
+        Returns a dict with per-layer and aggregate stats including:
+        - components_per_layer: dict of layer -> (k_a, k_b)
+        - total_params: total parameters in compressed representation
+        - total_original: estimated original parameters (N adapters)
+        - compression_ratio: original / compressed
+        """
+        n_tasks = len(self.tasks)
+        total_compressed = 0
+        total_original = 0
+        per_layer = {}
+
+        for layer in self.layer_names:
+            k_a = self.components_a[layer].shape[0]
+            k_b = self.components_b[layer].shape[0]
+            dim_a = self.components_a[layer].shape[1]
+            dim_b = self.components_b[layer].shape[1]
+
+            # Compressed: components + means + per-task loadings
+            layer_compressed = (
+                k_a * dim_a + k_b * dim_b  # components
+                + dim_a + dim_b  # means
+                + n_tasks * (k_a + k_b)  # loadings
+            )
+            # Original: N full adapter matrices
+            layer_original = n_tasks * (dim_a + dim_b)
+
+            per_layer[layer] = {
+                "k_a": k_a, "k_b": k_b,
+                "compressed": layer_compressed,
+                "original": layer_original,
+            }
+            total_compressed += layer_compressed
+            total_original += layer_original
+
+        return {
+            "components_per_layer": {l: (d["k_a"], d["k_b"]) for l, d in per_layer.items()},
+            "total_params_compressed": total_compressed,
+            "total_params_original": total_original,
+            "compression_ratio": total_original / total_compressed if total_compressed > 0 else 0,
+            "num_tasks": n_tasks,
+            "num_layers": len(self.layer_names),
+        }
 
     def get_trainable_params(
         self, task_id: str, num_expand: int = 0
