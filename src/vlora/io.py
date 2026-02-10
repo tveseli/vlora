@@ -7,12 +7,15 @@ library at runtime.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 import torch
+
+logger = logging.getLogger("vlora")
 from safetensors.torch import load_file, save_file
 from torch import Tensor
 
@@ -93,6 +96,7 @@ def load_adapter(path: str | Path) -> LoRAWeights:
         metadata = config
 
     lora_a, lora_b, layer_names = parse_state_dict(state_dict)
+    logger.debug("Loaded adapter from %s: %d layers", path, len(layer_names))
 
     # Infer rank from weight shapes if not in config
     if rank == 0 and layer_names:
@@ -175,9 +179,13 @@ def save_adapter(weights: LoRAWeights, path: str | Path) -> None:
 
     save_file(state_dict, str(path / "adapter_model.safetensors"))
 
-    # Save config
+    # Save config — include defaults needed by vLLM/TGI
     config = dict(weights.metadata) if weights.metadata else {}
     config.setdefault("r", weights.rank)
+    config.setdefault("lora_alpha", weights.rank)  # alpha=rank → scaling=1.0
     config.setdefault("peft_type", "LORA")
+    config.setdefault("task_type", "CAUSAL_LM")
+    config.setdefault("bias", "none")
+    config.setdefault("lora_dropout", 0.0)
     with open(path / "adapter_config.json", "w") as f:
         json.dump(config, f, indent=2)

@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from vlora._validate import check_task_exists
 from vlora.subspace import SharedSubspace
 
 
@@ -33,12 +34,20 @@ class VLoRAModel(nn.Module):
         self,
         base_model: nn.Module,
         subspace: SharedSubspace,
-        scaling: float = 1.0,
+        scaling: float | None = None,
+        lora_alpha: float | None = None,
     ):
         super().__init__()
         self.base_model = base_model
         self.subspace = subspace
-        self.scaling = scaling
+
+        # Resolve scaling: explicit scaling > lora_alpha/rank > 1.0
+        if scaling is not None:
+            self.scaling = scaling
+        elif lora_alpha is not None:
+            self.scaling = lora_alpha / subspace.rank
+        else:
+            self.scaling = 1.0
         self._active_task: str | None = None
         self._cached_deltas: dict[str, Tensor] | None = None
         self._hooks: list[torch.utils.hooks.RemovableHook] = []
@@ -48,9 +57,7 @@ class VLoRAModel(nn.Module):
         if task_id == self._active_task:
             return
 
-        if task_id not in self.subspace.tasks:
-            available = ", ".join(sorted(self.subspace.tasks.keys()))
-            raise KeyError(f"Unknown task '{task_id}'. Available: {available}")
+        check_task_exists(self.subspace, task_id)
 
         # Reconstruct and cache the LoRA deltas
         weights = self.subspace.reconstruct(task_id)

@@ -48,23 +48,37 @@ subspace = SharedSubspace.load("shared_subspace/")
 
 ## CLI
 
-vlora ships with a command-line tool for common workflows:
+vlora ships with 9 commands for common workflows:
 
 ```bash
 # Build a shared subspace from adapter directories
 vlora compress adapters/task_0 adapters/task_1 adapters/task_2 -o shared_subspace/
 
-# Inspect a subspace
+# Inspect a subspace (--json for machine-readable output)
 vlora info shared_subspace/
 
-# Export a task back to PEFT format
-vlora export shared_subspace/ task_0 -o exported_adapter/
+# Export a task back to PEFT format (vLLM/TGI compatible)
+vlora export shared_subspace/ task_0 -o exported_adapter/ \
+  --alpha 32 --base-model meta-llama/Llama-3-8B --target-modules q_proj,v_proj
 
 # Add a new adapter to an existing subspace
-vlora add shared_subspace/ adapters/new_task --task-id new_task
+vlora add shared_subspace/ adapters/new_task --task-id new_task --incremental
 
 # Analyze adapter similarity and clustering
 vlora analyze adapters/task_0 adapters/task_1 adapters/task_2
+
+# Merge adapters using task arithmetic, TIES, or DARE
+vlora merge adapters/task_0 adapters/task_1 adapters/task_2 \
+  -o merged/ --method ties --density 0.5
+
+# Health check a subspace (NaN, orthonormality, loadings consistency)
+vlora validate shared_subspace/
+
+# Compare two tasks within a subspace
+vlora diff shared_subspace/ task_0 task_1
+
+# Benchmark subspace operations
+vlora benchmark shared_subspace/
 ```
 
 ## Multi-Task Inference
@@ -75,7 +89,7 @@ Wrap any PyTorch model with `VLoRAModel` for on-the-fly adapter switching:
 from vlora import VLoRAModel, SharedSubspace
 
 subspace = SharedSubspace.load("shared_subspace/")
-model = VLoRAModel(base_model, subspace)
+model = VLoRAModel(base_model, subspace, lora_alpha=32)  # or scaling=alpha/rank
 
 # Switch adapters instantly — reconstructed from compressed loadings
 model.set_task("task_0")
@@ -144,6 +158,25 @@ clusters = find_clusters(sim_matrix, threshold=0.9)
 diff = adapter_diff(adapters[0], adapters[1])
 ```
 
+## Adapter Merging
+
+Merge multiple adapters into one using state-of-the-art techniques:
+
+```python
+from vlora import load_adapter, task_arithmetic, ties_merge, dare_merge
+
+adapters = [load_adapter(f"adapters/task_{i}") for i in range(3)]
+
+# Simple weighted average
+merged = task_arithmetic(adapters, weights=[0.5, 0.3, 0.2])
+
+# TIES: trim small values, elect sign by majority, average (reduces interference)
+merged = ties_merge(adapters, density=0.5)
+
+# DARE: randomly drop & rescale before averaging (sparsification regularizer)
+merged = dare_merge(adapters, drop_rate=0.5, seed=42)
+```
+
 ## Advanced Compression
 
 ```python
@@ -205,7 +238,7 @@ subspace.to(device="cuda", dtype=torch.float16)
 
 ### Model Integration
 
-- **`VLoRAModel(base_model, subspace)`** — Inference wrapper with forward hooks
+- **`VLoRAModel(base_model, subspace, lora_alpha=None)`** — Inference wrapper with forward hooks
   - `.set_task(task_id)` — Switch adapter (cached)
   - `.clear_task()` — Remove adapter
   - `.available_tasks` — List task IDs
@@ -223,6 +256,12 @@ subspace.to(device="cuda", dtype=torch.float16)
 - **`TaskRouter(input_dim, num_tasks)`** — Lightweight adapter routing MLP
   - `.from_subspace(subspace, input_dim)` — Auto-create from subspace
   - `.blend_loadings(x, subspace)` — Per-input adapter blending
+
+### Merging
+
+- **`task_arithmetic(adapters, weights=None)`** — Weighted average merge
+- **`ties_merge(adapters, density=0.5, weights=None)`** — Trim + elect sign + merge
+- **`dare_merge(adapters, drop_rate=0.5, weights=None, seed=None)`** — Drop and rescale merge
 
 ### Analysis
 

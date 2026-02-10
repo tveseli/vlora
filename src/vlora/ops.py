@@ -37,6 +37,12 @@ def compute_svd(
     # full_matrices=False gives the economy SVD — U is (N, min(N,D))
     U, S, Vh = torch.linalg.svd(centered, full_matrices=False)
 
+    if torch.isnan(S).any():
+        raise ValueError(
+            "SVD produced NaN singular values. Check input data for "
+            "NaN/Inf or try using float64 precision."
+        )
+
     k = num_components if num_components is not None else len(S)
     k = min(k, len(S))
 

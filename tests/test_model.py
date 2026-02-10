@@ -141,3 +141,19 @@ class TestVLoRAModel:
         for l in layers:
             assert l in deltas
             assert deltas[l].shape == (64, 64)  # (out_features, in_features)
+
+    def test_lora_alpha_scaling(self):
+        sub, base_model, _ = _make_adapters_and_model(dim=64)
+        # lora_alpha = 2 * rank → scaling = 2.0
+        model = VLoRAModel(base_model, sub, lora_alpha=sub.rank * 2)
+        assert model.scaling == 2.0
+
+    def test_scaling_overrides_lora_alpha(self):
+        sub, base_model, _ = _make_adapters_and_model(dim=64)
+        model = VLoRAModel(base_model, sub, scaling=0.5, lora_alpha=999)
+        assert model.scaling == 0.5
+
+    def test_default_scaling_is_one(self):
+        sub, base_model, _ = _make_adapters_and_model(dim=64)
+        model = VLoRAModel(base_model, sub)
+        assert model.scaling == 1.0

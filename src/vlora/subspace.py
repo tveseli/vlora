@@ -7,14 +7,23 @@ Step 3: absorb         — incorporate new adapter, recompute basis
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 import torch
+
+logger = logging.getLogger("vlora")
 from safetensors.torch import load_file, save_file
 from torch import Tensor
 
+from vlora._validate import (
+    check_adapter_matches_subspace,
+    check_adapters_compatible,
+    check_task_exists,
+    check_tensor_health,
+)
 from vlora.io import LoRAWeights, stack_lora_weights
 from vlora.ops import (
     compute_svd,
@@ -92,8 +101,8 @@ class SharedSubspace:
                 variance_threshold. Each layer gets the minimal k that explains
                 the threshold. Overrides num_components.
         """
-        if not adapters:
-            raise ValueError("Need at least one adapter")
+        check_adapters_compatible(adapters)
+        logger.info("Building subspace from %d adapters", len(adapters))
 
         if task_ids is None:
             task_ids = [f"task_{i}" for i in range(len(adapters))]
@@ -180,6 +189,11 @@ class SharedSubspace:
                 task_id=tid, loadings_a=loadings_a, loadings_b=loadings_b
             )
 
+        logger.info(
+            "Subspace built: k=%d, layers=%d, tasks=%d, rank=%d",
+            resolved_k, len(layer_names), len(tasks), rank,
+        )
+
         return cls(
             layer_names=layer_names,
             components_a=components_a,
@@ -195,6 +209,7 @@ class SharedSubspace:
 
     def project(self, adapter: LoRAWeights, task_id: str) -> TaskProjection:
         """Step 2a: Project a new adapter onto the existing basis."""
+        check_adapter_matches_subspace(adapter, self, "project")
         loadings_a: dict[str, Tensor] = {}
         loadings_b: dict[str, Tensor] = {}
 
@@ -214,8 +229,7 @@ class SharedSubspace:
 
     def reconstruct(self, task_id: str) -> LoRAWeights:
         """Reconstruct full LoRA weights for a task from its loadings."""
-        if task_id not in self.tasks:
-            raise KeyError(f"Unknown task: {task_id}")
+        check_task_exists(self, task_id)
 
         proj = self.tasks[task_id]
         lora_a: dict[str, Tensor] = {}
@@ -249,6 +263,8 @@ class SharedSubspace:
         Reconstructs all existing tasks, adds the new adapter, then
         reruns SVD to produce an updated basis.
         """
+        check_adapter_matches_subspace(new_adapter, self, "absorb")
+        logger.info("Absorbing adapter '%s' (full SVD recompute, %d existing tasks)", new_task_id, len(self.tasks))
         # Reconstruct all existing tasks as full adapters
         all_adapters = []
         all_ids = []
@@ -287,6 +303,8 @@ class SharedSubspace:
         Much faster than absorb() for large collections, with a small
         approximation trade-off.
         """
+        check_adapter_matches_subspace(new_adapter, self, "absorb_incremental")
+        logger.debug("Absorbing adapter '%s' incrementally", new_task_id)
         loadings_a: dict[str, Tensor] = {}
         loadings_b: dict[str, Tensor] = {}
 
@@ -506,6 +524,13 @@ class SharedSubspace:
             Dict of parameter name -> tensor (with requires_grad=True).
         """
         if num_expand > 0:
+            import warnings
+            warnings.warn(
+                f"get_trainable_params(num_expand={num_expand}) will permanently "
+                "expand the subspace basis via Gram-Schmidt. This modifies the "
+                "subspace in-place and cannot be undone.",
+                stacklevel=2,
+            )
             for layer in self.layer_names:
                 random_a = torch.randn(num_expand, self.components_a[layer].shape[1])
                 random_b = torch.randn(num_expand, self.components_b[layer].shape[1])

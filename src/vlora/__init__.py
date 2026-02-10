@@ -28,6 +28,7 @@ from vlora.pipeline import absorb_task, extract_adapter, init_subspace
 from vlora.router import TaskRouter
 from vlora.subspace import SharedSubspace, TaskProjection
 from vlora.training import SubspaceTrainer, orthogonal_init
+from vlora.merge import task_arithmetic, ties_merge, dare_merge
 
 __all__ = [
     # Core
@@ -63,4 +64,8 @@ __all__ = [
     "orthogonal_init",
     # Incremental
     "incremental_svd_update",
+    # Merging
+    "task_arithmetic",
+    "ties_merge",
+    "dare_merge",
 ]

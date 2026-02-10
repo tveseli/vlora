@@ -62,7 +62,7 @@ class TestCliHelp:
     def test_has_all_commands(self):
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])
-        for cmd in ["info", "compress", "export", "add", "analyze"]:
+        for cmd in ["info", "compress", "export", "add", "analyze", "validate", "diff", "benchmark", "merge"]:
             assert cmd in result.output
 
 
@@ -138,6 +138,38 @@ class TestAdd:
         result = runner.invoke(cli, ["add", str(sub_path), str(new_adapter), "--task-id", "new"])
         assert result.exit_code == 0, result.output
         assert "Tasks: 4" in result.output
+
+
+class TestMerge:
+    def test_merge_average(self, tmp_path):
+        dirs = _make_correlated_adapter_dirs(tmp_path, n=3)
+        output = tmp_path / "merged"
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["merge"] + [str(d) for d in dirs] + ["-o", str(output)])
+        assert result.exit_code == 0, result.output
+        assert (output / "adapter_model.safetensors").exists()
+        assert "Merged adapter saved to" in result.output
+
+    def test_merge_ties(self, tmp_path):
+        dirs = _make_correlated_adapter_dirs(tmp_path, n=3)
+        output = tmp_path / "merged_ties"
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["merge"] + [str(d) for d in dirs] + [
+            "-o", str(output), "--method", "ties", "--density", "0.7"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_merge_dare(self, tmp_path):
+        dirs = _make_correlated_adapter_dirs(tmp_path, n=3)
+        output = tmp_path / "merged_dare"
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["merge"] + [str(d) for d in dirs] + [
+            "-o", str(output), "--method", "dare", "--drop-rate", "0.3", "--seed", "42"
+        ])
+        assert result.exit_code == 0, result.output
 
 
 class TestAnalyze:
