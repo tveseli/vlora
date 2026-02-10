@@ -98,6 +98,97 @@ def gram_schmidt(basis: Tensor, new_vectors: Tensor) -> Tensor:
     return torch.stack(vectors)
 
 
+def incremental_svd_update(
+    components: Tensor,
+    singular_values: Tensor,
+    mean: Tensor,
+    n_seen: int,
+    new_data: Tensor,
+    max_components: int | None = None,
+) -> tuple[Tensor, Tensor, Tensor, int]:
+    """Incrementally update SVD with new data points.
+
+    Uses the projection-residual approach: project new data onto existing
+    basis, compute residual, and if significant, expand the basis with
+    the residual direction via QR decomposition.
+
+    Args:
+        components: (k, D) current orthonormal basis.
+        singular_values: (k,) current singular values.
+        mean: (D,) current data mean.
+        n_seen: Number of data points seen so far.
+        new_data: (m, D) new data points to incorporate.
+        max_components: Cap on number of components. If None, allows growth.
+
+    Returns:
+        updated_components: (k', D) updated basis.
+        updated_singular_values: (k',) updated singular values.
+        updated_mean: (D,) updated mean.
+        new_n_seen: Updated count.
+    """
+    m = new_data.shape[0]
+    n_total = n_seen + m
+
+    # Update mean incrementally
+    new_mean = (mean * n_seen + new_data.sum(dim=0)) / n_total
+
+    # Center new data with updated mean
+    centered_new = new_data - new_mean
+
+    # Also adjust for mean shift on existing data:
+    # The old centered data had mean=0 relative to old_mean.
+    # Relative to new_mean, old data is shifted by (old_mean - new_mean).
+    mean_shift = mean - new_mean
+
+    # Project new centered data onto existing basis
+    projections = centered_new @ components.T  # (m, k)
+    residuals = centered_new - projections @ components  # (m, D)
+
+    # Find new orthogonal directions from residuals via QR
+    residual_norms = residuals.norm(dim=1)
+    significant = residual_norms > 1e-6
+    new_directions = []
+
+    if significant.any():
+        sig_residuals = residuals[significant]
+        # Orthogonalize residuals against existing basis and each other
+        expanded = gram_schmidt(components, sig_residuals)
+        new_directions_tensor = expanded[components.shape[0]:]
+        if new_directions_tensor.shape[0] > 0:
+            new_directions.append(new_directions_tensor)
+
+    # Build augmented system
+    if new_directions:
+        extra = torch.cat(new_directions, dim=0)
+        all_components = torch.cat([components, extra], dim=0)
+        # Approximate new singular values for expanded directions
+        extra_projections = centered_new @ extra.T  # (m, n_extra)
+        extra_svals = extra_projections.norm(dim=0)
+        all_svals = torch.cat([singular_values, extra_svals])
+    else:
+        all_components = components
+        # Update singular values to account for new data contribution
+        new_contributions = projections.norm(dim=0)
+        all_svals = torch.sqrt(singular_values ** 2 + new_contributions ** 2)
+
+    # Account for mean shift effect on singular values
+    shift_proj = mean_shift @ all_components.T
+    shift_contribution = shift_proj * (n_seen ** 0.5)
+    all_svals = torch.sqrt(all_svals ** 2 + shift_contribution ** 2)
+
+    # Sort by singular value magnitude (descending)
+    order = all_svals.argsort(descending=True)
+    all_components = all_components[order]
+    all_svals = all_svals[order]
+
+    # Cap components if needed
+    if max_components is not None and all_components.shape[0] > max_components:
+        all_components = all_components[:max_components]
+        all_svals = all_svals[:max_components]
+
+    return all_components, all_svals, new_mean, n_total
+
+
 def explained_variance_ratio(singular_values: Tensor) -> Tensor:
     """Compute cumulative explained variance ratio from singular values.
 

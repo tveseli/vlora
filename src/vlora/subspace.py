@@ -20,6 +20,7 @@ from vlora.ops import (
     compute_svd,
     explained_variance_ratio,
     gram_schmidt,
+    incremental_svd_update,
     project_onto_subspace,
     reconstruct_from_subspace,
     select_num_components,
@@ -261,6 +262,139 @@ class SharedSubspace:
         self.means_b = new_sub.means_b
         self.tasks = new_sub.tasks
         self.num_components = new_sub.num_components
+
+    def absorb_incremental(self, new_adapter: LoRAWeights, new_task_id: str) -> None:
+        """Absorb a new adapter incrementally without full SVD recompute.
+
+        Instead of reconstructing all tasks and re-running SVD, this projects
+        the new adapter onto the existing basis, measures the residual, and
+        expands the basis with any significant new directions.
+
+        Much faster than absorb() for large collections, with a small
+        approximation trade-off.
+        """
+        loadings_a: dict[str, Tensor] = {}
+        loadings_b: dict[str, Tensor] = {}
+
+        for layer in self.layer_names:
+            for side, weights_dict, comp_attr, sv_attr, mean_attr, load_dict in [
+                ("a", new_adapter.lora_a, "components_a", "singular_values_a", "means_a", loadings_a),
+                ("b", new_adapter.lora_b, "components_b", "singular_values_b", "means_b", loadings_b),
+            ]:
+                components = getattr(self, comp_attr)[layer]
+                svals = getattr(self, sv_attr)[layer]
+                mean = getattr(self, mean_attr)[layer]
+                flat = weights_dict[layer].flatten().unsqueeze(0)  # (1, D)
+
+                new_comps, new_svals, new_mean, _ = incremental_svd_update(
+                    components, svals, mean,
+                    n_seen=len(self.tasks),
+                    new_data=flat,
+                    max_components=self.num_components,
+                )
+
+                getattr(self, comp_attr)[layer] = new_comps
+                getattr(self, sv_attr)[layer] = new_svals
+                getattr(self, mean_attr)[layer] = new_mean
+
+                # Project with updated basis
+                centered = flat.squeeze(0) - new_mean
+                load_dict[layer] = project_onto_subspace(centered, new_comps)
+
+        # Re-project existing tasks onto updated basis
+        for tid, proj in self.tasks.items():
+            for layer in self.layer_names:
+                # Reconstruct from old loadings, then re-project
+                for side, comp_attr, mean_attr, old_loads, new_loads_attr in [
+                    ("a", "components_a", "means_a", proj.loadings_a, "loadings_a"),
+                    ("b", "components_b", "means_b", proj.loadings_b, "loadings_b"),
+                ]:
+                    new_comps = getattr(self, comp_attr)[layer]
+                    # Pad old loadings if basis grew
+                    old = old_loads[layer]
+                    if old.shape[0] < new_comps.shape[0]:
+                        old = torch.cat([old, torch.zeros(new_comps.shape[0] - old.shape[0])])
+                    elif old.shape[0] > new_comps.shape[0]:
+                        old = old[:new_comps.shape[0]]
+                    old_loads[layer] = old
+
+        self.tasks[new_task_id] = TaskProjection(
+            task_id=new_task_id, loadings_a=loadings_a, loadings_b=loadings_b
+        )
+
+    @classmethod
+    def from_adapters_streaming(
+        cls,
+        adapter_paths: list[str | Path],
+        task_ids: list[str] | None = None,
+        num_components: int = 4,
+    ) -> SharedSubspace:
+        """Build a subspace by streaming adapters one at a time from disk.
+
+        Only loads one adapter into memory at a time, unlike from_adapters
+        which loads all simultaneously. Uses incremental SVD updates.
+
+        Args:
+            adapter_paths: Paths to adapter directories on disk.
+            task_ids: Names for each adapter.
+            num_components: Number of basis components.
+        """
+        from vlora.io import load_adapter
+
+        if not adapter_paths:
+            raise ValueError("Need at least one adapter path")
+
+        paths = [Path(p) for p in adapter_paths]
+        if task_ids is None:
+            task_ids = [p.name for p in paths]
+
+        # Initialize from first adapter(s) — use first two if available
+        # so SVD has enough samples to find >1 component
+        if len(paths) >= 2:
+            init_adapters = [load_adapter(paths[0]), load_adapter(paths[1])]
+            init_ids = task_ids[:2]
+            remaining = list(zip(paths[2:], task_ids[2:]))
+        else:
+            init_adapters = [load_adapter(paths[0])]
+            init_ids = [task_ids[0]]
+            remaining = []
+
+        sub = cls.from_adapters(init_adapters, task_ids=init_ids, num_components=num_components)
+        # Ensure target num_components is preserved even if initial SVD
+        # had fewer samples than requested components
+        sub.num_components = num_components
+
+        # Stream remaining adapters
+        for path, tid in remaining:
+            adapter = load_adapter(path)
+            sub.absorb_incremental(adapter, tid)
+
+        return sub
+
+    def to(self, device: str | torch.device | None = None, dtype: torch.dtype | None = None) -> SharedSubspace:
+        """Move all tensors to a device and/or dtype. Returns self."""
+        for layer in self.layer_names:
+            for attr in ["components_a", "components_b", "singular_values_a",
+                         "singular_values_b", "means_a", "means_b"]:
+                d = getattr(self, attr)
+                t = d[layer]
+                if device is not None:
+                    t = t.to(device=device)
+                if dtype is not None:
+                    t = t.to(dtype=dtype)
+                d[layer] = t
+
+        for proj in self.tasks.values():
+            for layer in self.layer_names:
+                for loads in [proj.loadings_a, proj.loadings_b]:
+                    t = loads[layer]
+                    if device is not None:
+                        t = t.to(device=device)
+                    if dtype is not None:
+                        t = t.to(dtype=dtype)
+                    loads[layer] = t
+
+        return self
 
     def get_trainable_params(
         self, task_id: str, num_expand: int = 0

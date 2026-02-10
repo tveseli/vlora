@@ -16,6 +16,8 @@ from vlora.ops import (
     reconstruct_from_subspace,
     select_num_components,
 )
+from vlora.model import VLoRAModel
+from vlora.ops import incremental_svd_update
 from vlora.analysis import (
     adapter_diff,
     compute_similarity_matrix,
@@ -50,4 +52,8 @@ __all__ = [
     "find_clusters",
     "adapter_diff",
     "subspace_coverage",
+    # Model
+    "VLoRAModel",
+    # Incremental
+    "incremental_svd_update",
 ]
