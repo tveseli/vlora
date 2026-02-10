@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  <strong>Shared low-rank subspaces for efficient LoRA adapter management.</strong>
+  <strong>Various LoRA adapters. One shared basis.</strong>
 </p>
 
-Based on the [Share paper](https://arxiv.org/abs/2602.06043): LoRA adapters across tasks share a common low-rank subspace. Instead of storing *N* separate adapters, maintain **one shared basis** and **per-task coefficient vectors** — achieving up to 122× compression at scale.
+Your adapters share more structure than you think. vLoRA finds the common basis and stores each adapter as a tiny coefficient vector — up to 122× compression at scale. Based on the [Share paper](https://arxiv.org/abs/2602.06043).
 
 ## Install
 
